@@ -1247,95 +1247,112 @@ def patch_recon(**par_in):
 
 #Solves min_{c} \|Kc-u0\| + \|c\|_nuc + \|c\|_{1,\infty}
 def svd_thresh_opt(**par_in):
-#version information:
 
-    version='Version 0'
 
-    imname = 'barbara_crop.png'
-    #imname = 'stripes.png'
-    #imname = 'barbara_256.png'
-    #imname = 'blackboard_learning.png'
+    #Initialize parameters and data input
+    par = parameter({})
+    data_in = data_input({})
 
-    #Direct image input
-    u0 = 0
-    #Ground truth data inputcoefficient input
-    data = {} #Expecting {'A':A,'K':K}
+
+    ##Set data
+    data_in.u0 = 0 #Direct image input
+    #Ground truth data and coefficient input
+    data_in.data = {} #Expecting {'A':A,'K':K}
+
+    ##Set parameter
+    par.version='Version 1, update to python 3'
+
+    par.imname = 'imsource/barbara_crop.png'
     
-    sp_type = 'l1-svd' #Sparsity-type: {'l1-svd','l0-svd'}
+    par.stride = 3 #Stride for convoution
     
-    stride = 3
+    par.niter = 1 #Number of iterations
+
+    par.ksz = 9 #Size of filter kernels
+    
+    
+    par.sp_type = 'l1-svd' #Sparsity-type: {'l1-svd','l0-svd'}
     
     #Test range
-    rg = range(10,100,10)
+    par.rg = range(10,100,10)
 
-    ksz = 9 #Size of filter kernels
+    par.ksz = 9 #Size of filter kernels
 
-    noise=0.1
+    par.noise=0.1
     
-    show = False
+    par.show = False
 
-    #Set parameter according to par_in ----------
-    par = par_parse(locals().copy(),par_in)
-    #Update parameter
-    for key,val in par.items():
-        exec(key + '= val')
-    res = output(par) #Initialize output class
-    #--------------------------------------------
+    ##Data and parmaeter parsing
+    
+    #Set parameters according to par_in
+    par_parse(par_in,[par,data_in])
+
 
     #Load data or image
-    if np.any(data):
-        K = data['K']
-        A = data['A']
+    if np.any(data_in.data):
+        K = data_in.data['K']
+        A = data_in.data['A']
         
-        if not np.any(u0):
-            u0 = K.fwd(A)
-        ksz = K.ksz
-        stride = K.stride
-        
-        res.A = A
-        res.K = K
-        
-    if not np.any(u0):
-        u0 = imread(imname)
-
-    #Set original input
-    res.orig = np.copy(u0)
-
+        #Update kernel size ans stride to fit with K
+        par.ksz = K.ksz
+        par.stridestride = K.stride
     
+        if not np.any(data_in.u0):
+            data_in.u0 = K.fwd(A)
+        
+    if not np.any(data_in.u0):
+        data_in.u0 = imread(par.imname)
+        
+        
+    ## Data initilaization
+    u0 = np.copy(data_in.u0)
+
+
     #Add noise
-    if noise:
+    if par.noise:
         np.random.seed(1)
-        u0 = np.copy(u0)
-        u0 += np.random.normal(scale=noise,size=u0.shape) #0.1 is default
-
-    
         
-    res.u0 = u0
+        rg = np.abs(u0.max() - u0.min()) #Image range
+        
+        u0 += np.random.normal(scale=par.noise*rg,size=u0.shape) #Add noise
+    
 
     #Image size
     N,M = u0.shape
 
+
     #Operators and norms
-    if not np.any(data):
-        K = lconv([N,M,ksz],stride=stride)
+    if not np.any(data_in.data):
+        K = lconv([N,M,par.ksz],stride=par.stride)
 
 
     #Norm function for threshold
-    nrm = nfun(sp_type)
+    nrm = nfun(par.sp_type)
 
 
     #Array for mse
-    mseval = np.zeros(len(rg))
-    for pos,i in enumerate(rg):
+    mseval = np.zeros(len(par.rg))
+    for pos,i in enumerate(par.rg):
     
-        mseval[pos] = mse(K.fwd(nrm.prox(K.adj(res.u0),ppar=float(i))),res.orig,rescaled=1)
+        mseval[pos] = mse(K.fwd(nrm.prox(K.adj(u0),ppar=float(i))),data_in.u0,rescaled=1)
     
     
     mpos = np.argmin(mseval)
 
     fac = np.ceil(float(K.ksz)/float(K.stride))**2.0
 
-    res.c = nrm.prox(K.adj(res.u0),ppar=float(rg[mpos]))
+
+
+    #Initialize output class
+    res = output(par)
+
+
+    #Set original input
+    res.orig = data_in.u0
+    res.u0 = u0
+
+
+    res.c = nrm.prox(K.adj(res.u0),ppar=float(par.rg[mpos]))
     res.u = K.fwd(res.c)/fac    
     
     res.mseopt = mse(res.u,res.orig,rescaled=1)    
@@ -1343,7 +1360,7 @@ def svd_thresh_opt(**par_in):
     res.coeff,res.patch,res.sig = decomp_lifted(mshape(res.c),K,nfs=16,show=True)
     
     
-    if show:
+    if par.show:
         
         imshow(np.concatenate([res.orig,res.u0,res.u],axis=1),title='Orig vs noisy vs rec')
 
@@ -1364,109 +1381,109 @@ def svd_thresh_opt(**par_in):
 def conv_lasso_tv(**par_in):
 
 
-    imname = 'barbara_crop.png'
+    #Initialize parameters and data input
+    par = parameter({})
+    data_in = data_input({})
 
-    #Direct image input
-    u0 = 0
-    #Ground truth data inputcoefficient input
-    data = {} #Expecting {'A':A,'K':K}
-    
-    #Filter parameter    
-    stride = 3
-    ksz = 9 #Size of filter kernels
-    
-        
-    niter = 1
-    
-    ld = 20.0 #Data missfit
-    mu = 500.0 #TV vs. dict penalty, in (-infty,infty), where negative values penalize TV, positive values penalize the dict
-    noise=0.1
-    
-    
-    noise=0.1 #Standard deviaion of gaussian noise in percent of image range
 
-    eps = 10e-08 #Smoothing of TV norm
+    ##Set data
+    data_in.u0 = 0 #Direct image input
+    #Ground truth data and coefficient input
+    data_in.data = {} #Expecting {'A':A,'K':K}
 
-    check = 10 #Show results ever "check" iteration
+    ##Set parameter
+    par.version='Version 2, update to python 3'
+
+    par.imname = 'imsource/barbara_crop.png'
     
-    nf = 2 #Number of filters
+    par.stride = 3 #Stride for convoution
+    
+    par.niter = 1 #Number of iterations
 
-    show = False
+    par.ksz = 9 #Size of filter kernels
+    
+    par.ld = 20.0 #Data missfit
+    par.mu = 500.0 #TGV vs. dict penalty, in (-infty,infty), where negative values penalize TGV, positive values penalize the dict
+
+    par.noise=0.1 #Standard deviaion of gaussian noise in percent of image range
+    
+
+    par.check = 10 #Show results ever "check" iteration
+    par.show = False
+    
+    par.eps = 10e-08 #Smoothing of TV norm
+    par.nf = 2 #Number of filters
+
 
     #Initial stepsizes
-    Lc = np.exp2(10)
-    LD = np.exp2(10)
+    par.Lc = np.exp2(10)
+    par.LD = np.exp2(10)
     
-    beta = 0.707 #Inertia parameter
+    par.beta = 0.707 #Inertia parameter
 
 
-    #Set parameter according to par_in ----------
-    par = par_parse(locals().copy(),par_in)
-    #Update parameter
-    for key,val in par.items():
-        exec(key + '= val')
-    res = output(par) #Initialize output class
-    #--------------------------------------------
+    ##Data and parmaeter parsing
+    
+    #Set parameters according to par_in
+    par_parse(par_in,[par,data_in])
 
 
     #Load data or image
-    if np.any(data):
-        K = data['K']
-        A = data['A']
+    if np.any(data_in.data):
+        K = data_in.data['K']
+        A = data_in.data['A']
         
-        if not np.any(u0):
-            u0 = K.fwd(A)
-        ksz = K.ksz
-        stride = K.stride
+        #Update kernel size ans stride to fit with K
+        par.ksz = K.ksz
+        par.stridestride = K.stride
+    
+        if not np.any(data_in.u0):
+            data_in.u0 = K.fwd(A)
         
-        res.A = A
-        res.K = K
-        
-    if not np.any(u0):
-        u0 = imread(imname)
+    if not np.any(data_in.u0):
+        data_in.u0 = imread(par.imname)
 
-    #Set original input
-    res.orig = np.copy(u0)
-    u0 = np.copy(u0)
 
+
+    ##Parameter parsing
+     
+    #Set reguarlization parameter
+    par.ptv = 1.0 - min(par.mu,0.0)
+    par.pcoeff = 1.0 + max(par.mu,0.0)
+    print('Parameter for TV/patch-coefficients: ' + str(par.ptv) + '/' + str(par.pcoeff) )
+
+
+    #Initialize stepsize
+    Lc = par.Lc
+    LD = par.LD
+
+    ## Data initilaization
+    u0 = np.copy(data_in.u0)
+    
     #Add noise
-    np.random.seed(1)
-    if noise:
+    if par.noise:
+        np.random.seed(1)
         
         rg = np.abs(u0.max() - u0.min()) #Image range
         
-        u0 += np.random.normal(scale=noise*rg,size=u0.shape) #Add noise
+        u0 += np.random.normal(scale=par.noise*rg,size=u0.shape) #Add noise
     
-        
-    res.u0 = u0
-
-    #Set parameter
-    ptv = 1.0 - min(mu,0.0)
-    pcoeff = 1.0 + max(mu,0.0)
-
-
-    print('Parameter for TV/patch-coefficients: ' + str(ptv) + '/' + str(pcoeff) )
-
 
     #Image size
     N,M = u0.shape
 
-
     #Operators and norms
-    if not np.any(data):
-        K = cp_conv([N,M,ksz,nf],stride=stride)
+    if not np.any(data_in.data):
+        K = cp_conv([N,M,par.ksz,par.nf],stride=par.stride)
+
 
     grad = gradient(u0.shape)
 
 
-    #zconst = nfun('I0')
-    #pconst = nfun('I0')
-
-    #nucnrm = nfun(nuc_type,npar=pnuc,eps=semiconv_eps,delta=semiconv_delta,vdims=(2,3))
-    pnrm = nfun('l1',npar=pcoeff,vdims=())
-    dnrm = nfun('l2sq',mshift=u0,npar=ld)
+    pnrm = nfun('l1',npar=par.pcoeff,vdims=())
+    dnrm = nfun('l2sq',mshift=u0,npar=par.ld)
     
-    l1vec = nfun('l1eps',vdims=(2),npar=ptv)
+    l1vec = nfun('l1eps',vdims=(2),npar=par.ptv)
     
     l2nsq = nfun('l2sq')
 
@@ -1481,17 +1498,17 @@ def conv_lasso_tv(**par_in):
 
     
    
-    ob_val = np.zeros(niter+1)
+    ob_val = np.zeros(par.niter+1)
 
     ob_val[0] = dnrm.val(u) + l1vec.val( grad.fwd(u - K.fwd(c,D)) ) + pnrm.val(c) 
         
     print('Iter: ' + str(0) + ', E: ' + str(ob_val[0]) + ', Lc: ' + str(Lc) + ', LD: ' + str(LD))
 
-    for k in range(niter):
+    for k in range(par.niter):
 
-        uI = u + beta*(u - u_old)
-        cI = c + beta*(c - c_old)
-        DI = D + beta*(D - D_old)
+        uI = u + par.beta*(u - u_old)
+        cI = c + par.beta*(c - c_old)
+        DI = D + par.beta*(D - D_old)
 
         u_old = u
         c_old = c
@@ -1549,7 +1566,7 @@ def conv_lasso_tv(**par_in):
             #Forwad step
             D = DI - (1/LD)*gradD
             #Prox
-            D -= D.sum(axis=(0,1),keepdims=True)/(ksz*ksz) #Mean
+            D -= D.sum(axis=(0,1),keepdims=True)/(par.ksz*par.ksz) #Mean
             D /= np.maximum(1.0, np.sqrt(np.square(D).sum(axis=(0,1),keepdims=True)) ) #Norm <=1
             
             #Quadratic approximation
@@ -1567,13 +1584,14 @@ def conv_lasso_tv(**par_in):
                 bt += 1
 
 
-        if np.remainder(k,check) == 0:
-            
-            ob_val[k+1] = dnrm.val(u) + l1vec.val( grad.fwd(u - K.fwd(c,D) )) + pnrm.val(c) 
+        ob_val[k+1] = dnrm.val(u) + l1vec.val( grad.fwd(u - K.fwd(c,D) )) + pnrm.val(c) 
+
+        if np.remainder(k,par.check) == 0:
+
             
             print('Iter: ' + str(k+1) + ', E: ' + str(ob_val[k+1]) + ', Lc: ' + str(Lc) + ', LD: ' + str(LD))
             
-    if show:        
+    if par.show:        
         #Noise vs denoised
         imshow(np.concatenate([u0,u],axis=1),title='Noisy vs. Denoised')
 
@@ -1584,14 +1602,22 @@ def conv_lasso_tv(**par_in):
 
         #Filter kernels
         imshow(D,title='filter kernels')
+
+
+    #Initialize output class
+    res = output(par)
+
+
+    #Set original input
+    res.orig = data_in.u0
+    res.u0 = u0
             
     res.D = D
     res.c = c
     res.u = u
     res.imsyn = K.fwd(c,D)
     res.K = K
-    res.u0 = u0
-    
+    res.ob_val = ob_val
     
     return res
 
